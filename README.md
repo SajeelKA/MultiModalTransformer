@@ -1,5 +1,9 @@
 # MultiModalTransformer
 
+### This repository is meant to be a lightweight proof-of-concept for training a Paligemma architecture from scratch. Ths official implementation on huggingface only has pretrained weights and inference code but no training algorithm. 
+### I intend to create a training loop that can be run from a free version of Google Colaboratory within the GPU usage limits. Therefore, the text prompt and output is very basic while training data is the MNIST handwritten digit dataset. 
+### Future work includes improving the results on recognizing the digits, possibly by reducing the output vocabulary (final logits layer). Another thing to try would be to pretrain the Vision Encoder with the input text prompt in a CLIP-like fashion.
+
 ## Instructions
 
 #### This project was trained on Google Colaboratory, so a path needs to be made under '/content/drive/MyDrive/MultiModal' in your Google Drive. This path will act as the root directory
@@ -7,6 +11,8 @@
 #### Next, you can open the runTrainingScript.ipynb file and login to huggingface through the command-line using a token generated from a huggingface account
 
 #### After that, you can run the cell which runs the file "Train.py" to be able to run the training. 
+
+#### When training starts, we can notice within the first few minutes, that the model starts learns the output text
 
 ### Hyper-parameters that can be input to the train script:
   
@@ -206,7 +212,5 @@
 ================== total flops =============== 
 
 140,841,810 x T
-
-
 
 
