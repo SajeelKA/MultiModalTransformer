@@ -1,6 +1,6 @@
 # MultiModalTransformer
 
-### This repository is meant to be a lightweight proof-of-concept for training a Paligemma architecture from scratch. Ths official implementation on huggingface only has pretrained weights and inference code but no training algorithm. 
+### This repository is meant to be a lightweight proof-of-concept for training a Paligemma architecture from scratch. The official implementation on huggingface only has pretrained weights and inference code but no training algorithm. 
 ### I intend to create a training loop that can be run from a free version of Google Colaboratory within the GPU usage limits. Therefore, the text prompt and output is very basic while training data is the MNIST handwritten digit dataset. 
 ### Future work includes improving the results on recognizing the digits, possibly by reducing the output vocabulary (final logits layer). Another thing to try would be to pretrain the Vision Encoder with the input text prompt in a CLIP-like fashion.
 
