@@ -2,7 +2,8 @@
 
 ## Instructions
 
-#### This project was trained on Google Colaboratory, so a path needs to be made under '/content/drive/MyDrive/MultiModal' as it will act as the root directory
+#### This project was trained on Google Colaboratory, so a path needs to be made under '/content/drive/MyDrive/MultiModal' 
+#### in your Google Drive. This path will act as the root directory
 
 #### Next, you can open the runTrainingScript.ipynb file and login to huggingface through the command-line using a token generated from a huggingface account
 
