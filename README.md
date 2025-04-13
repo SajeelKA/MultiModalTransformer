@@ -24,16 +24,16 @@
 
 # Parameters Per Component and Sample Flop Calculation:
 
-## Given:
-## Batch Size = 2
-## Image embedding channels = 512
-## Image patch size = 1
-## Image component number of layers = 2
-## Text vocabulary size = 257153
-## Text embedding channels = 128
-## Text number of layers = 1
+### Given:
+### Batch Size = 2
+### Image embedding channels = 512
+### Image patch size = 1
+### Image component number of layers = 2
+### Text vocabulary size = 257153
+### Text embedding channels = 128
+### Text number of layers = 1
 
-# and "T" represents sequence length
+### and "T" represents sequence length
 
 257153 x 128 = 32915584 total parameters for embed.weight
 0 flops
