@@ -8,7 +8,7 @@
 
 #### This project was trained on Google Colaboratory, so a path needs to be made under '/content/drive/MyDrive/MultiModal' in your Google Drive. This path will act as the root directory
 
-#### Next, you can open the runTrainingScript.ipynb file and login to huggingface through the command-line using a token generated from a huggingface account
+#### Next, you can open the runTrainingScript.ipynb file and login to huggingface through the command-line using a token generated from a huggingface account (you will need to request access to the "google/paligemma2-3b-pt-224" model from the huggingface team if you don't have access already)
 
 #### After that, you can run the cell which runs the file "Train.py" to be able to run the training. 
 
