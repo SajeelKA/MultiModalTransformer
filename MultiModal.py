@@ -305,10 +305,12 @@ class MultiModalPipeline(nn.Module):
 
         # Combine the embeddings of the image tokens, the text tokens and mask out all the padding tokens.
         final_embedding = torch.zeros(batch_size, sequence_length, embed_dim, dtype=inputs_embeds.dtype, device=inputs_embeds.device)
+        #===============================================
         # Shape: [Batch_Size, Seq_Len]. whereever it's not an image or padding
-        text_mask = (input_ids != self.config.image_token_index) & (input_ids != self.tokenizer.pad_token_id)
+        text_mask = (input_ids != 257152) & (input_ids != self.tokenizer.pad_token_id) #current tokenizer uses 257152 for image token
         # Shape: [Batch_Size, Seq_Len]. whereever input_ids = image_token_index
-        image_mask = input_ids == self.config.image_token_index
+        image_mask = input_ids == 257152 #current tokenizer uses this number for image token #self.config.image_token_index
+        #================================================
         # Shape: [Batch_Size, Seq_Len]. whereever it's padding
         pad_mask = input_ids == self.tokenizer.pad_token_id #tokenizer.pad_token_type_id
 
