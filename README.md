@@ -2,15 +2,14 @@
 
 ### This repository is meant to be a lightweight proof-of-concept for training a VQA task from scratch using the Paligemma architecture (the Paligemma architecture itself has also been written from scratch, so it is different from the original implementation). Also, the official implementation on huggingface only has pretrained weights and inference code but no training algorithm. 
 ### I intended to create a training loop that can be run from a free version of Google Colaboratory within the GPU usage limits. Therefore, the text prompt and output is very basic while training data is the MNIST handwritten digit dataset. 
-### Future work includes improving the results on recognizing the digits, possibly by reducing the output vocabulary (final logits layer). Another thing to try would be to pretrain the Vision Encoder with the input text prompt in a CLIP-like fashion.
+### The data is based only on individual characters and numbers to reduce computational complexity as much as possible. The model will predict the next character one-by-one instead of predicting an entire word out of all possible words.
+### Future work includes improving the results on recognizing the digits, possibly by pretraining the Vision Encoder with the input text prompt in a CLIP-like fashion.
 
 ## Instructions
 
 #### This project was trained on Google Colaboratory, so a path needs to be made under '/content/drive/MyDrive/MultiModal' in your Google Drive. This path will act as the root directory
 
-#### Next, you can open the runTrainingScript.ipynb file and login to huggingface through the command-line using a token generated from a huggingface account (you will need to request access to the "google/paligemma2-3b-pt-224" model from the huggingface team if you don't have access already)
-
-#### After that, you can run the cell which runs the file "Train.py" to be able to run the training. 
+#### Next, you can open the runTrainingScript.ipynb file and you can run the cell which runs the file "Train.py" to be able to start the training. 
 
 #### When training starts, we can notice within the first few minutes, that the model starts learns the output text
 
