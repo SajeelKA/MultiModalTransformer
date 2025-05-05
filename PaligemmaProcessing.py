@@ -139,3 +139,43 @@ class PaliGemmaProcessor:
         return_data = {"pixel_values": pixel_values, **inputs}
 
         return return_data
+
+class CharacterProcessor:
+
+    IMAGE_TOKEN = "<image>"
+
+    def __init__(self, tokenMap, num_image_tokens: int, image_size: int):
+        super().__init__()
+
+        self.image_seq_length = num_image_tokens
+        self.image_size = image_size
+        self.tokenMap = tokenMap
+
+    def __call__(
+        self,
+        textIds: List[List],
+        images: List[Image.Image]
+    ) -> dict:
+
+        pixel_values = process_images(
+            images,
+            size=(self.image_size, self.image_size),
+            resample=Image.Resampling.BICUBIC,
+            rescale_factor=1 / 255.0,
+            image_mean=IMAGENET_STANDARD_MEAN,
+            image_std=IMAGENET_STANDARD_STD,
+        )
+        # Convert the list of numpy arrays to a single numpy array with shape [Batch_Size, Channel, Height, Width]
+        pixel_values = np.stack(pixel_values, axis=0)
+        # Convert the numpy array to a PyTorch tensor
+        pixel_values = torch.tensor(pixel_values)
+
+        # Prepend a `self.image_seq_length` number of image tokens to the prompt
+        inputIds = [[self.tokenMap['<image>']] * self.image_seq_length  + [self.tokenMap['<bos>']] + prompt + [self.tokenMap['\n']] for  prompt in textIds]
+
+        # Returns the input_ids and attention_mask as PyTorch tensors
+
+        return_data = {"pixel_values": pixel_values, "inputs": torch.tensor(inputIds)}
+
+        return return_data
+

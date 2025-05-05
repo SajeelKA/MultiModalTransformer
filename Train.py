@@ -5,7 +5,6 @@ import torch.nn.functional as F
 import torchvision
 from torchvision import transforms
 from dataclasses import dataclass
-import matplotlib.pyplot as plt
 from typing import Optional
 import sys
 import os
@@ -64,7 +63,7 @@ class TextConfigs:
   batchSize:int  = 8
   maxSeqLength:int = 32
   dropoutRate:float = 0.5
-  device:str = 'cpu'
+  device:str = 'cuda'
 
 
 def runTraining():
@@ -85,7 +84,7 @@ def runTraining():
   args = parser.parse_args()
   print('\n\n' + '=' * 40 + ' Starting training with parameters: ', args, '=' * 40 + '\n\n' )
 
-  tokenizer, paliConfig = MultiModal.getPaligemmaVars()
+
   transform = transforms.Compose([	  
     transforms.Grayscale(num_output_channels=3),  # Ensure 3 channels (if needed)
     transforms.ToTensor(),  # Convert to tensor
@@ -104,6 +103,16 @@ def runTraining():
   len(trainLoader)
 
   imageDim = 28
+  
+  allChars =[l for l in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz1234567890!@#$%^&*()?,./;\n']
+  vocab = sorted(list(set(allChars)))
+  tokenMap = {k:v for v, k in enumerate(vocab)}
+  charsAvailable = len(tokenMap.keys())
+  tokenMap['<image>'] =  charsAvailable
+  tokenMap['<bos>'] = charsAvailable + 1
+  processing = PaligemmaProcessing.CharacterProcessor(tokenMap, imageDim * imageDim, imageDim)
+  wordToList = lambda sInput, tokenMapping: [tokenMapping[letter] for letter in sInput] # to get numerical tensor to feed into nn.Embedding function (each letter has it's index)
+  tensorToWord = lambda sIndexes, tokenMapping: [list(tokenMapping.keys())[i.item()] for i in sIndexes]
 
   iConf = MultiModal.Configs #vision configs
   iConf.embeddingChannels = args.imageChannels
@@ -116,79 +125,77 @@ def runTraining():
 
   tConf = MultiModal.TextConfigs
   tConf.batchSize = gBatchSize
-  tConf.vocabSize = tokenizer.vocab_size + 1
+  tConf.vocabSize = len(tokenMap.keys())
   tConf.visionEmbeddingChannels = iConf.embeddingChannels #this is so we just need to pass one config to the multiModalProjector
   tConf.textEmbeddingChannels = args.textChannels
   tConf.numLayers = args.nTextLayers
   tConf.numHeads = args.parallelHeads
   tConf.device = gDevice
 
-  processing = PaligemmaProcessing.PaliGemmaProcessor(tokenizer, imageDim * imageDim, imageDim)
-
-  model1 = MultiModal.MultiModalPipeline(tConf, iConf, paliConfig, tokenizer).to(device=gDevice)
-  prompt = ['Which digit is this?']
+  model1 = MultiModal.MultiModalPipeline(tConf, iConf, tokenMap).to(device=gDevice)
+  promptStrings = ['Which digit is this?'] * gBatchSize
   batchNumber = 0
 
   optimizer = torch.optim.Adam(model1.parameters(), lr=args.learningRate) #make optimizer for the decoder block
   torch.autograd.set_detect_anomaly(True)
   epochs = 10
-  total_loss = []
+  
+  print('\n Using processor: ', gDevice)
 
 	# Assuming your dataset is defined as trainDataset
 	# Define your transformations
 
   for epoch in range(epochs):
-      total_loss = []  # To track the total loss
-      batchNumber = 0  # To count the batch number
+    batchNumber = 0  # To count the batch number
+      
+    for x, y in trainLoader:
+      # Preprocessing step
+      pil_images = [torchvision.transforms.functional.to_pil_image(x[i,...]) for i in range(x.shape[0])]
+      labelStrings = ['The digit is ' + str(yy.item()) for yy in y]
+      inputs = [wordToList(p, tokenMap) for p in promptStrings]
+      labels = torch.tensor([wordToList(l, tokenMap) for l in labelStrings],dtype=torch.long)
+      inputDict = processing(inputs, pil_images)
+      t = 0
+      accum = 0
+      while t < labels.shape[1]:
+        if t > 0:
+          inputIds = torch.cat((inputIds.to(device=gDevice), outLogits.to(device=gDevice)), dim = 1)
+          attMask = torch.cat((attMask.to(device=gDevice), torch.ones(outLogits.shape, dtype=torch.long).to(device=gDevice)), dim = 1)
+        else:
+          inputIds = inputDict['inputs'].to(device=gDevice)
+          attMask = torch.ones(inputIds.shape).to(device=gDevice)
 
-      for x, y in trainLoader:
-          # Preprocessing step
-          pil_images = [torchvision.transforms.functional.to_pil_image(x[i,...]) for i in range(x.shape[0])]
+        #generate 1 token
+        predictions, loss = model1(
+            inputIds,
+            inputDict['pixel_values'].to(device=gDevice),
+            attMask,
+            labels=labels.clone()[:,t].unsqueeze(1)
+        )
+        outLogits = torch.argmax(predictions.clone().detach(), dim=-1).unsqueeze(1).clone().detach()
+        if t == 0:
+          outputString = outLogits
+        else:
+          outputString = torch.cat((outputString, outLogits), dim = 1)
 
-          inputDict = processing(prompt * len(pil_images), pil_images)  # Adjust prompt repetition based on the batch size
+        t += 1
+        accum += loss
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
 
-          # Tokenize the labels and move labels to the device (assuming 'gDevice' is defined)
-          labels = torch.tensor([tokenizer.encode(f"The digit is {digit.item()}") for digit in y], dtype=torch.long).to(device=gDevice)
-          # labels = torch.tensor([tokenizer.encode(f"{digit.item()}") for digit in y], dtype=torch.long)
+      # Track total loss for the epoch
+      batchNumber += 1
 
-          optimizer.zero_grad()
-          t = 0
-          while t < labels.shape[1]:
-            if t > 0:
-              inputIds = torch.cat((inputIds.to(device=gDevice), outLogits.to(device=gDevice)), dim = 1)
-              attMask = torch.cat((attMask.to(device=gDevice), torch.ones(outLogits.shape, dtype=torch.long).to(device=gDevice)), dim = 1)
-            else:
-              inputIds = inputDict['input_ids'].to(device=gDevice)
-              attMask = inputDict['attention_mask'].to(device=gDevice)
-            #generate 1 token
-            predictions, loss = model1(
-                inputIds,
-                inputDict['pixel_values'].to(device=gDevice),
-                attMask,
-                labels=labels.clone()[:,t].unsqueeze(1)
-            )
-            outLogits = torch.argmax(predictions.clone().detach(), dim=-1).unsqueeze(1).clone().detach()
-            if t == 0:
-              outputString = outLogits.squeeze(1)
-            else:
-              outputString = torch.cat((outputString, outLogits.squeeze(1)), dim = 0)
+      # Print out the loss every few batches (optional)
+      if batchNumber % 5 == 0:
+          print(f"Batch {batchNumber}: Accumulated loss = {accum.item()}: Loss = {loss.item()}: Sample labels: {y}: Test Output:  {[''.join(tensorToWord(o, tokenMap)) for o in outputString]}")
 
-            t += 1
-            # Backpropagation
-            loss.backward()
-            optimizer.step()
-
-          # Track total loss for the epoch
-          batchNumber += 1
-          total_loss.append(loss.item())
-
-          # Print out the loss every few batches (optional)
-          if batchNumber % 5 == 0:
-              print(f"Batch {batchNumber}: Loss = {loss.item()}: Sample labels: {y}: Test Output:  {tokenizer.decode(outputString)}")
-
-      # Print average loss after each epoch
-      print('====', torch.mean(torch.tensor(total_loss)), '=====', 'Sample label: ', y[0].item(),
-            'Test Output: ', tokenizer.decode(torch.argmax(predictions[0], dim=-1)))
+    # Print average loss after each epoch
+    print('====', torch.mean(torch.tensor(accum)), '=====', 'Sample label: ', y, 'Test Output: ', [''.join(tensorToWord(o, tokenMap)) for o in outputString])
+    saveModel(model, pathReq = args.savePath)
 
 if __name__ == '__main__':
 	runTraining()
+
+

@@ -1,5 +1,3 @@
-from transformers import AutoTokenizer
-from transformers import PaliGemmaForConditionalGeneration, PaliGemmaConfig, SiglipVisionConfig, GemmaConfig
 import torch
 import numpy as np
 import torch.nn as nn
@@ -8,38 +6,6 @@ from dataclasses import dataclass
 import matplotlib.pyplot as plt
 from typing import Optional
 
-def getPaligemmaVars():
-	tokenizer = AutoTokenizer.from_pretrained("google/paligemma2-3b-pt-224")
-	vision_config = SiglipVisionConfig(
-	    image_size=224,
-	    patch_size=14,
-	    num_hidden_layers=27,
-	    num_attention_heads=16,
-	    hidden_size=1152,
-	    intermediate_size=4096,
-	    vocab_size=257152,
-	    vision_use_head=False
-	)
-
-	# Initialize Gemma text configuration
-	text_config = GemmaConfig(
-	    hidden_size=2048,
-	    num_hidden_layers=18,
-	    intermediate_size=16384,
-	    num_attention_heads=8,
-	    num_key_value_heads=1,
-	    is_encoder_decoder=False,
-	    vocab_size=257152
-	)
-
-	paliConfig = PaliGemmaConfig(
-	    vision_config=vision_config.to_dict(),
-	    text_config=text_config.to_dict(),
-	    projection_dim=2048,
-	    hidden_size=2048
-	)
-
-	return tokenizer, paliConfig 
 
 @dataclass
 class Configs:
@@ -286,77 +252,57 @@ class MultiModalTransformer(nn.Module):
     return multiModalToLogits
     
 class MultiModalPipeline(nn.Module):
-  def __init__(self, textConfigs: TextConfigs, visionConfigs: Configs, paliConfig: PaliGemmaConfig, tokenizer: AutoTokenizer):
+  def __init__(self, textConfigs: TextConfigs, visionConfigs: Configs, tokenMap):
     super().__init__()
     self.textConfigs = textConfigs
-    self.embed = nn.Embedding(textConfigs.vocabSize, textConfigs.textEmbeddingChannels).to(device=textConfigs.device)
+    self.visionConfigs = visionConfigs
+    self.embed = nn.Embedding(textConfigs.vocabSize + 1, textConfigs.textEmbeddingChannels).to(device=textConfigs.device)
     self.imageComponent = SiglipTransformer(visionConfigs).to(device=textConfigs.device)
     self.projected = MultiModalProjector(textConfigs).to(device=textConfigs.device)
     self.logits = MultiModalTransformer(textConfigs).to(device=textConfigs.device)
-    self.config = paliConfig
-    self.tokenizer = tokenizer
-    
-  def _merge_input_ids_with_image_features(self, image_features: torch.Tensor, inputs_embeds: torch.Tensor, input_ids: torch.Tensor, attention_mask: torch.Tensor):
-        _, _, embed_dim = image_features.shape
-        batch_size, sequence_length = input_ids.shape
-        dtype, device = inputs_embeds.dtype, inputs_embeds.device
-        # Shape: [Batch_Size, Seq_Len, Hidden_Size]
-        scaled_image_features = image_features / (self.config.hidden_size**0.5)
+    self.tokenMap = tokenMap
 
-        # Combine the embeddings of the image tokens, the text tokens and mask out all the padding tokens.
-        final_embedding = torch.zeros(batch_size, sequence_length, embed_dim, dtype=inputs_embeds.dtype, device=inputs_embeds.device)
-        #===============================================
-        # Shape: [Batch_Size, Seq_Len]. whereever it's not an image or padding
-        text_mask = (input_ids != 257152) & (input_ids != self.tokenizer.pad_token_id) #current tokenizer uses 257152 for image token
-        # Shape: [Batch_Size, Seq_Len]. whereever input_ids = image_token_index
-        image_mask = input_ids == 257152 #current tokenizer uses this number for image token #self.config.image_token_index
-        #================================================
-        # Shape: [Batch_Size, Seq_Len]. whereever it's padding
-        pad_mask = input_ids == self.tokenizer.pad_token_id #tokenizer.pad_token_type_id
+  def _merge_input_ids_with_image_features(self, image_features: torch.Tensor, inputs_embeds: torch.Tensor, input_ids: torch.Tensor, attention_mask: torch.Tensor, image_token_index: int, pad_token_id: int, hidden_size: float):
+      _, _, embed_dim = image_features.shape
+      batch_size, sequence_length = input_ids.shape
+      dtype, device = inputs_embeds.dtype, inputs_embeds.device
+      # Shape: [Batch_Size, Seq_Len, Hidden_Size]
+      scaled_image_features = image_features / (hidden_size**0.5)
 
-        # We need to expand the masks to the embedding dimension otherwise we can't use them in torch.where
-        text_mask_expanded = text_mask.unsqueeze(-1).expand(-1, -1, embed_dim)
-        pad_mask_expanded = pad_mask.unsqueeze(-1).expand(-1, -1, embed_dim)
-        image_mask_expanded = image_mask.unsqueeze(-1).expand(-1, -1, embed_dim)
+      # Combine the embeddings of the image tokens, the text tokens and mask out all the padding tokens.
+      final_embedding = torch.zeros(batch_size, sequence_length, embed_dim, dtype=inputs_embeds.dtype, device=inputs_embeds.device)
+      final_embedding[:, scaled_image_features.shape[1]:] = inputs_embeds[:, scaled_image_features.shape[1]:]
+      final_embedding[:, :scaled_image_features.shape[1]] = scaled_image_features
 
-        # Add the text embeddings
-        final_embedding = torch.where( text_mask_expanded, inputs_embeds, final_embedding) #select inputs_embeds where text_mask_expanded is 1
-        # Insert image embeddings. We can't use torch.where because the sequence length of scaled_image_features is not equal to the sequence length of the final embedding
-        final_embedding = final_embedding.masked_scatter(image_mask_expanded, scaled_image_features)
-        # Zero out padding tokens
-        final_embedding = torch.where(pad_mask_expanded, torch.zeros_like(final_embedding), final_embedding)
 
-        #### CREATE THE ATTENTION MASK ####
+      #### CREATE THE ATTENTION MASK ####
 
-        dtype, device = inputs_embeds.dtype, inputs_embeds.device
-        min_dtype = torch.finfo(dtype).min
-        q_len = inputs_embeds.shape[1]
+      min_dtype = torch.finfo(dtype).min
+      q_len = inputs_embeds.shape[1]
 
-		# Do not mask any token, because we're in the prefill phase
-		# This only works when we have no padding
-        causal_mask = torch.full(
-		    (batch_size, q_len, q_len), fill_value=0, dtype=dtype, device=device
-		)
-        # Add the head dimension
-        # [Batch_Size, Q_Len, KV_Len] -> [Batch_Size, Num_Heads_Q, Q_Len, KV_Len]
-        causal_mask = causal_mask.unsqueeze(1)
+      # Do not mask any token, because we're in the prefill phase
+      # This only works when we have no padding
+      causal_mask = torch.full(
+          (batch_size, q_len, q_len), fill_value=0, dtype=dtype, device=device
+      )
 
-        # Create a position_ids based on the size of the attention_mask
-        # For masked tokens, use the number 1 as position.
-        position_ids = (attention_mask.cumsum(-1)).masked_fill_((attention_mask == 0), 1).to(device)
+      # Add the head dimension
+      causal_mask = causal_mask.unsqueeze(1)
+      position_ids = (attention_mask.cumsum(-1)).masked_fill_((attention_mask == 0), 1).to(device)
 
-        return final_embedding, causal_mask, position_ids
+      return final_embedding, causal_mask, position_ids
 
-  def forward(self, input_ids: torch.LongTensor = None,pixel_values: torch.FloatTensor = None,attention_mask: Optional[torch.Tensor] = None, labels = None):
+  def forward(self, input_ids: torch.LongTensor = None,pixel_values: torch.FloatTensor = None,attention_mask: Optional[torch.Tensor] = None,kv_cache = None, labels = None):
     inputs_embeds = self.embed(input_ids)
     h = self.imageComponent(pixel_values)
     h = self.projected(h)
-    inputs_embeds, attention_mask, position_ids = self._merge_input_ids_with_image_features(h, inputs_embeds, input_ids, attention_mask)
+    inputs_embeds, attention_mask, position_ids = self._merge_input_ids_with_image_features(h, inputs_embeds, input_ids, attention_mask, self.tokenMap['<image>'], 500, self.visionConfigs.intermediateEmbedding)
+
     finalLogits = self.logits(attention_mask=attention_mask,position_ids=position_ids,multiModalToLogits=inputs_embeds)
+    finalLogits = finalLogits[:, -1]
     labels = labels.reshape(labels.shape[0] * labels.shape[1])
-    pred = finalLogits[:, -1]
-    loss = F.cross_entropy(pred, labels)
+    pred = finalLogits
+
+    loss = F.cross_entropy(pred.to(device= self.textConfigs.device), labels.to(device= self.textConfigs.device))
 
     return pred, loss
-
-
