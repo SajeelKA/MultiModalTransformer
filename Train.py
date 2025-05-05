@@ -193,7 +193,7 @@ def runTraining():
 
     # Print average loss after each epoch
     print('====', torch.mean(torch.tensor(accum)), '=====', 'Sample label: ', y, 'Test Output: ', [''.join(tensorToWord(o, tokenMap)) for o in outputString])
-    saveModel(model, pathReq = args.savePath)
+    saveModel(model1, pathReq = args.savePath)
 
 if __name__ == '__main__':
 	runTraining()
